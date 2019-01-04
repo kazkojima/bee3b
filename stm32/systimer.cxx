@@ -89,9 +89,12 @@ ef::timers::add (uint32_t usec, uint32_t id)
   if (!timer_list.empty ())
     {
       node *it = timer_list.begin ();
-      (*it).val += systimer::ticks_to_usec (systimer::get ());
+      uint32_t rem = systimer::get ();
       systimer::init ();
-  
+      uint32_t remusec = systimer::ticks_to_usec (rem);
+      (*it).val += remusec;
+      rem -= systimer::usec_to_ticks (remusec);
+
       for (; it != timer_list.end (); it = it->next)
 	{
 	  if (usec < (*it).val)
@@ -116,7 +119,8 @@ ef::timers::add (uint32_t usec, uint32_t id)
       if (ticks > max_ticks)
 	ticks = max_ticks;
       usec -= systimer::ticks_to_usec (ticks);
-      systimer::reload (ticks);
+      // Don't set zero to reload
+      systimer::reload (ticks + rem + 1);
       (*it).val = usec;
     }
   else
@@ -142,7 +146,7 @@ ef::timers::update (void)
   node *it = timer_list.begin ();
   uint32_t usec = (*it).val;
 
-  if (usec == 0)
+  while (usec == 0)
     {
       eventflag::signal ((*it).id);
       eventflag::release_id ((*it).id);

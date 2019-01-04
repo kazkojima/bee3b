@@ -24,7 +24,6 @@
 #include "lwip/netdb.h"
 
 #include "b3packet.h"
-
 #include "pwm.h"
 
 esp_err_t event_handler(void *ctx, system_event_t *event)
@@ -63,27 +62,41 @@ int sockfd = -1;
 SemaphoreHandle_t send_sem;
 SemaphoreHandle_t i2c_sem;
 SemaphoreHandle_t nvs_sem;
+SemaphoreHandle_t pwm_sem;
 
-#define PACKET_SIZE 32
 #define PKT_QSIZE 32
 static xQueueHandle pkt_queue;
 
 volatile uint16_t pwmbuf[PACKET_SIZE / sizeof(uint16_t)];
 
+extern uint16_t bat_voltage;
+extern uint16_t range_milimeter;
+extern int16_t opt_flow_x;
+extern int16_t opt_flow_y;
+extern int16_t opt_quality;
+
 static void
 spi_task(void *arg)
 {
     char recvbuf[PACKET_SIZE];
+    char sendbuf[PACKET_SIZE];
 
     vTaskDelay(5000 / portTICK_PERIOD_MS);
 
     spi_slave_transaction_t t;
     memset(&t, 0, sizeof(t));
     t.length = PACKET_SIZE*8;
-    t.tx_buffer = (uint8_t *)pwmbuf;
+    t.tx_buffer = sendbuf;
     t.rx_buffer = recvbuf;
 
+    uint32_t last_pwm_count = 0;
+    float rate = 0;
+
     while(1) {
+        xSemaphoreTake(pwm_sem, portMAX_DELAY);
+        memcpy (sendbuf, (void *)pwmbuf, PACKET_SIZE);
+        xSemaphoreGive(pwm_sem);
+
         esp_err_t ret = spi_slave_transmit(VSPI_HOST, &t, portMAX_DELAY);
         //printf("spi_slave_transmit -> %x\n", ret);
         if (ret == ESP_OK) {
@@ -91,6 +104,20 @@ spi_task(void *arg)
                 printf("fail to queue packet\n");
             }
         }
+
+        // compute pwm rate here. expect 100-150
+        rate = (1.0f-0.01f)*rate + 0.01f*500.0f*(pwm_count - last_pwm_count);
+        last_pwm_count = pwm_count;
+
+        xSemaphoreTake(pwm_sem, portMAX_DELAY);
+        pwmbuf[RC_RATE] = (uint16_t) rate;
+        pwmbuf[BAT_IDX] = bat_voltage;
+        pwmbuf[POSZ_IDX] = range_milimeter;
+        pwmbuf[OFQ_IDX] = opt_quality;
+        pwmbuf[OFX_IDX] = opt_flow_x;
+        pwmbuf[OFY_IDX] = opt_flow_y;
+        xSemaphoreGive(pwm_sem);
+        //printf ("rate %3.2f\n", rate);
     }
 }
 
@@ -110,6 +137,9 @@ static void udp_task(void *arg)
     }
 
     printf("... allocated socket\r\n");
+
+    int option = 1;
+    setsockopt (sockfd, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option));
 
     memset((char *) &caddr, 0, sizeof(caddr));
     caddr.sin_family = AF_INET;
@@ -298,6 +328,7 @@ extern void pwm_task(void *arg);
 extern void baro_task(void *arg);
 extern void bat_task(void *arg);
 extern void rn_task(void *arg);
+extern void of_task(void *arg);
 
 void app_main(void)
 {
@@ -329,6 +360,7 @@ void app_main(void)
     vSemaphoreCreateBinary(send_sem);
     vSemaphoreCreateBinary(i2c_sem);
     vSemaphoreCreateBinary(nvs_sem);
+    vSemaphoreCreateBinary(pwm_sem);
 
     // packet queue
     pkt_queue = xQueueCreate(PKT_QSIZE, PACKET_SIZE);
@@ -337,7 +369,8 @@ void app_main(void)
     xTaskCreate(pwm_task, "pwm_task", 2048, NULL, 8, NULL);
     xTaskCreate(baro_task, "baro_task", 2048, NULL, 7, NULL);
     xTaskCreate(rn_task, "rn_task", 4096, NULL, 6, NULL);
-    xTaskCreate(bat_task, "bat_task", 2048, NULL, 5, NULL);
+    xTaskCreate(of_task, "of_task", 2048, NULL, 5, NULL);
+    xTaskCreate(bat_task, "bat_task", 2048, NULL, 4, NULL);
 
     gpio_set_level(GPIO_MARKER_LED, 1);
 

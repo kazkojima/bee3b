@@ -27,6 +27,8 @@ static int i2c_handle = I2C_NUM_0;
 extern int sockfd;
 extern SemaphoreHandle_t send_sem;
 
+uint16_t range_milimeter;
+
 void
 rn_task(void *arg)
 {
@@ -86,9 +88,11 @@ rn_task(void *arg)
             union { float f; uint8_t bytes[sizeof(float)];} df;
             if(status==0) {
                 df.f = ((float)RangingData.RangeMilliMeter) * 0.1f;
+                range_milimeter = (uint16_t)RangingData.RangeMilliMeter;
                 //printf("%3.2f\n", df.f);
             } else {
                 df.f = -1.0f;
+                range_milimeter = 0xffff;
                 printf("VL53L1_GetRangingMeasurementData failed\n");
             }
             memcpy(&pkt.data[0], df.bytes, sizeof(df));

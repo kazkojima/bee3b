@@ -15,6 +15,7 @@ struct B3packet {
 #define TOS_GPS         12
 #define TOS_BAT         16
 #define TOS_RANGE       18
+#define TOS_OF		20
 #define TOS_BIN		32
 
 #define TOS_PWM         64

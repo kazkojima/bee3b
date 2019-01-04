@@ -20,6 +20,9 @@ CXXSRC = \
 	spi.cxx \
 	inven.cxx \
 	pwm.cxx \
+	rotor.cxx \
+	biquadFilter.cxx \
+	flight.cxx \
 	efmain.cxx
 
 CSRC = \
@@ -36,7 +39,8 @@ MCU   = cortex-m7
 CWARN = -Wall -Wextra
 DEFS  = -DFREE_STANDING -DMHZ=216 -DMCU_STM32F722 -DUSE_FPU_AUTO_SAVE
 OPT   = -O3 -Os -g -mfloat-abi=hard -mfpu=fpv4-sp-d16 -ffast-math
-LIBS  =
+EXTRA_LDFLAGS = -mfloat-abi=hard -mfpu=fpv5-sp-d16 -ffast-math
+LIBS  = -lm
 
 include $(EFROOT)/rules.mk
 

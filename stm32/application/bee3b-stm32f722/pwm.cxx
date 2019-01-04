@@ -143,8 +143,6 @@ tim4_init (void)
 bool
 tim4_set_pwm_width (uint16_t *width)
 {
-  if (width[15] != 0xbe3b)
-    return false;
   TIM4->CCR1 = width[0];
   TIM4->CCR2 = width[1];
   TIM4->CCR3 = width[2];

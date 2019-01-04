@@ -23,6 +23,8 @@
 #include "spi.h"
 #include <cstdlib>
 
+#include "inven.h"
+
 using namespace ef;
 
 //#define ROTATION_YAW	180
@@ -77,6 +79,9 @@ using namespace ef;
 #define I2C_SLV0_DO     0x63
 #define I2C_MST_DELAY_CTRL 0x67
 
+#define FIFO_WM_TH1	0x60
+#define FIFO_WM_TH2	0x61
+
 #define USER_CTRL       0x6A
 #define PWR_MGMT_1      0x6B
 #define PWR_MGMT_2      0x6C
@@ -128,6 +133,19 @@ wait_ms (uint32_t ms)
   thread::poll (flags);
 }
 
+static void
+wait_us (uint32_t us)
+{
+  if (!us)
+    return;
+
+  bitset flags;
+  thread::poll_section ();
+  flags.clear ();
+  flags.add (eventflag::timeout_event (us));
+  thread::poll (flags);
+}
+
 // buffers on DCTM
 static uint8_t sendbuf[4];
 static uint8_t recvbuf[4];
@@ -157,30 +175,29 @@ icm20602_ready (void)
   return (val & 1);
 }
 
-struct sample {
-  uint8_t reg;
-  uint8_t d[14];
-};
-
 int
 icm20602_fifo_count (void)
 {
   bool rv;
   sendbuf[0] = 0x80 | FIFO_COUNTH;
+  sendbuf[1] = 0;
+  sendbuf[2] = 0;
   rv = spi1_transfer (sendbuf, recvbuf, 3);
   return rv ? be16_val(&recvbuf[1], 0) : 0;
 }
 
 // on DCTM
-static struct sample sx;
+static struct icm20602_sample sx;
 
-static bool
-icm20602_read_fifo (struct sample *rxp)
+bool
+icm20602_read_fifo (int n, struct icm20602_sample *rxp)
 {
   bool rv;
-  memset (&sx, 0, sizeof(struct sample));
+  size_t sz = 1+ICM20602_SIZE_OF_SAMPLE*n;
+  memset (&sx, 0, sz);
   sx.reg = 0x80 | FIFO_R_W;
-  rv = spi1_transfer ((uint8_t *)&sx, (uint8_t *)rxp, sizeof(struct sample));
+  rv = spi1_transfer ((uint8_t *)&sx, (uint8_t *)rxp, sz);
+  wait_us(1);
   return rv;
 }
 
@@ -201,15 +218,15 @@ static bool check_fifo(int t)
 static void
 icm20602_fifo_reset (void)
 {
-    uint8_t val = icm20602_read (USER_CTRL);
-    val &= ~0x44;
-    icm20602_write (FIFO_EN, 0);
-    icm20602_write (USER_CTRL, val);
-    icm20602_write (USER_CTRL, val|0x04);
-    icm20602_write (USER_CTRL, val|0x40);
-    // All except external sensors
-    icm20602_write (FIFO_EN, 0xf8);
-    wait_ms (1);
+  uint8_t val = icm20602_read (USER_CTRL);
+  val &= ~0x44;
+  icm20602_write (FIFO_EN, 0);
+  icm20602_write (USER_CTRL, val);
+  icm20602_write (USER_CTRL, val|0x04);
+  icm20602_write (USER_CTRL, val|0x40);
+  // All except external sensors
+  icm20602_write (FIFO_EN, 0xf8);
+  wait_us (100);
 }
 
 static void
@@ -222,12 +239,12 @@ icm20602_start(void)
   icm20602_write (MPU_CONFIG, /*(1<<6)|*/1);
   wait_ms (1);
 
-  // Sample rate 1000Hz
+  // Not effective
   icm20602_write (SMPLRT_DIV, 0);
   wait_ms (1);
 
-  // Gyro 2000dps
-  icm20602_write (GYRO_CONFIG, 3<<3);
+  // Gyro 2000dps FCHOICE_B 1 32kHz rate 8kHz BW
+  icm20602_write (GYRO_CONFIG, (3<<3)|1);
   wait_ms (1);
 
   // Accel full scale 16g
@@ -237,13 +254,15 @@ icm20602_start(void)
   icm20602_write (MPUREG_ICM_UNDOC1, MPUREG_ICM_UNDOC1_VALUE);
   wait_ms (1);
     
-  // Set LPF to 218Hz BW
-  icm20602_write (ACCEL_CONFIG2, 1);
+  // Bypass DLP for 4kHz rate
+  icm20602_write (ACCEL_CONFIG2, 0x8);
   wait_ms (1);
 
   uint8_t val;
-  // INT enable on RDY
-  icm20602_write (INT_ENABLE, 1);
+  // INT enable on FIFO Watermark with 8 samples
+  icm20602_write (FIFO_WM_TH1, 0x00);
+  wait_ms (1);
+  icm20602_write (FIFO_WM_TH2, 0x70);
   wait_ms (1);
 
   val = icm20602_read (INT_PIN_CFG);
@@ -260,6 +279,7 @@ icm20602_init (void)
   if (rv != ICM20602_ID) {
     return false;
   }
+  wait_ms (10);
 
   uint8_t tries;
   for (tries = 0; tries < 5; tries++) {
@@ -269,6 +289,8 @@ icm20602_init (void)
 	icm20602_write (USER_CTRL, rv &~ (1<<5));
 	wait_ms (10);
       }
+
+    wait_ms (5);
 
     // Reset
     icm20602_write (PWR_MGMT_1, 0x80);
@@ -311,89 +333,63 @@ icm20602_init (void)
   return true;
 }
 
-// on DCTM
-static struct sample rx;
+int fifo_err_count = 0;
 
 bool
-icm20602_get_values (float& gx, float& gy, float& gz,
+icm20602_get_sample (uint8_t *rp, float& gx, float& gy, float& gz,
 		     float& ax, float& ay, float& az, float &temp)
 {
-
-  icm20602_read_fifo (&rx);
-
-  int16_t t = be16_val(rx.d, 3);
+  int16_t t = be16_val(rp, 3);
   if (!check_fifo (t))
     {
       icm20602_fifo_reset();
       //printf("temp reset fifo %04x %d\n", t, fifo_count);
+      fifo_err_count++;
       return false;
     }
 
   // adjust and serialize floats into packet bytes
   // skew accel/gyro frames so to match AK8963 NED frame
 #if (ROTATION_YAW == 0)
-  ax = ((float)be16_val(rx.d, 1)) * ICM20602_ACCEL_SCALE_1G;
-  ay = ((float)be16_val(rx.d, 0)) * ICM20602_ACCEL_SCALE_1G;
-  az = -((float)be16_val(rx.d, 2)) * ICM20602_ACCEL_SCALE_1G;
+  ax = ((float)be16_val(rp, 1)) * ICM20602_ACCEL_SCALE_1G;
+  ay = ((float)be16_val(rp, 0)) * ICM20602_ACCEL_SCALE_1G;
+  az = -((float)be16_val(rp, 2)) * ICM20602_ACCEL_SCALE_1G;
 #elif (ROTATION_YAW == 90)
-  ax = -((float)be16_val(rx.d, 0)) * ICM20602_ACCEL_SCALE_1G;
-  ay = ((float)be16_val(rx.d, 1)) * ICM20602_ACCEL_SCALE_1G;
-  az = -((float)be16_val(rx.d, 2)) * ICM20602_ACCEL_SCALE_1G;
+  ax = -((float)be16_val(rp, 0)) * ICM20602_ACCEL_SCALE_1G;
+  ay = ((float)be16_val(rp, 1)) * ICM20602_ACCEL_SCALE_1G;
+  az = -((float)be16_val(rp, 2)) * ICM20602_ACCEL_SCALE_1G;
 #elif (ROTATION_YAW == 180)
-  ax = -((float)be16_val(rx.d, 1)) * ICM20602_ACCEL_SCALE_1G;
-  ay = -((float)be16_val(rx.d, 0)) * ICM20602_ACCEL_SCALE_1G;
-  az = -((float)be16_val(rx.d, 2)) * ICM20602_ACCEL_SCALE_1G;
+  ax = -((float)be16_val(rp, 1)) * ICM20602_ACCEL_SCALE_1G;
+  ay = -((float)be16_val(rp, 0)) * ICM20602_ACCEL_SCALE_1G;
+  az = -((float)be16_val(rp, 2)) * ICM20602_ACCEL_SCALE_1G;
 #elif (ROTATION_YAW == 270)
-  ax = ((float)be16_val(rx.d, 0)) * ICM20602_ACCEL_SCALE_1G;
-  ay = -((float)be16_val(rx.d, 1)) * ICM20602_ACCEL_SCALE_1G;
-  az = -((float)be16_val(rx.d, 2)) * ICM20602_ACCEL_SCALE_1G;
+  ax = ((float)be16_val(rp, 0)) * ICM20602_ACCEL_SCALE_1G;
+  ay = -((float)be16_val(rp, 1)) * ICM20602_ACCEL_SCALE_1G;
+  az = -((float)be16_val(rp, 2)) * ICM20602_ACCEL_SCALE_1G;
 #else
 #error "bad ROTATION_YAW value"
 #endif
 
-  temp = ((float)be16_val(rx.d, 3)) * TEMP_SCALE + TEMP_OFFSET;
+  temp = ((float)be16_val(rp, 3)) * TEMP_SCALE + TEMP_OFFSET;
 
 #if (ROTATION_YAW == 0)
-  gx = ((float)be16_val(rx.d, 5)) * GYRO_SCALE;
-  gy = ((float)be16_val(rx.d, 4)) * GYRO_SCALE;
-  gz = -((float)be16_val(rx.d, 6)) * GYRO_SCALE;
+  gx = ((float)be16_val(rp, 5)) * GYRO_SCALE;
+  gy = ((float)be16_val(rp, 4)) * GYRO_SCALE;
+  gz = -((float)be16_val(rp, 6)) * GYRO_SCALE;
 #elif (ROTATION_YAW == 90)
-  gx = -((float)be16_val(rx.d, 4)) * GYRO_SCALE;
-  gy = ((float)be16_val(rx.d, 5)) * GYRO_SCALE;
-  gz = -((float)be16_val(rx.d, 6)) * GYRO_SCALE;
+  gx = -((float)be16_val(rp, 4)) * GYRO_SCALE;
+  gy = ((float)be16_val(rp, 5)) * GYRO_SCALE;
+  gz = -((float)be16_val(rp, 6)) * GYRO_SCALE;
 #elif (ROTATION_YAW == 180)
-  gx = -((float)be16_val(rx.d, 5)) * GYRO_SCALE;
-  gy = -((float)be16_val(rx.d, 4)) * GYRO_SCALE;
-  gz = -((float)be16_val(rx.d, 6)) * GYRO_SCALE;
+  gx = -((float)be16_val(rp, 5)) * GYRO_SCALE;
+  gy = -((float)be16_val(rp, 4)) * GYRO_SCALE;
+  gz = -((float)be16_val(rp, 6)) * GYRO_SCALE;
 #elif (ROTATION_YAW == 270)
-  gx = ((float)be16_val(rx.d, 4)) * GYRO_SCALE;
-  gy = -((float)be16_val(rx.d, 5)) * GYRO_SCALE;
-  gz = -((float)be16_val(rx.d, 6)) * GYRO_SCALE;
+  gx = ((float)be16_val(rp, 4)) * GYRO_SCALE;
+  gy = -((float)be16_val(rp, 5)) * GYRO_SCALE;
+  gz = -((float)be16_val(rp, 6)) * GYRO_SCALE;
 #else
 #error "bad ROTATION_YAW value"
 #endif
   return true;
 }
-
-#if 0
-iven_uses ()
-{
-  while (1)
-    {
-      uint32_t gpio_num;
-      //WAIT INT
-
-      int fifo_count = icm20602_fifo_count ();
-      if (fifo_count == 0)
-	continue;
-
-      int n_sample = fifo_count / sizeof(rx);
-      while(n_sample--)
-	{
-	  float gx, gy, gz, ax, ay, az, t;
-	  if (icm20602_get_values (gx, gy, gz, ax, ay, az, t))
-	    {
-	    }
-	}
-}
-#endif

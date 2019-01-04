@@ -79,6 +79,7 @@ extern SemaphoreHandle_t send_sem;
 float vbat_open, cbat_open;
 bool low_battery = false;
 uint32_t n_battery_cells = 1;
+uint16_t bat_voltage;
 
 static int maybe_low_voltage = 0;
 
@@ -132,6 +133,8 @@ void bat_task(void *arg)
         //printf("%7.3f %7.3f\n", vf, cf);
         vf = sma_filter(vf, vmem, N_SMA);
         cf = sma_filter(cf, cmem, N_SMA);
+
+        bat_voltage = vf * 1024;
 
         if (cf >= BATTERY_CURRENT_LIMIT) {
             pwm_shutdown();
