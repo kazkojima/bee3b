@@ -58,8 +58,8 @@ flightController::hedge (float c, float si, float sj, float sk,
 			  uint16_t ch4)
 {
 #if 1
-  //m_bpitch = (1.0f - EPSILON)*m_bpitch + EPSILON*(-(c*si + sk*sj));
-  //m_broll = (1.0f - EPSILON)*m_broll + EPSILON*(-(c*sj - sk*si));
+  //m_bpitch = (1.0f - EPSILON)*m_bpitch + EPSILON*(-(c*si - sk*sj));
+  //m_broll = (1.0f - EPSILON)*m_broll + EPSILON*(-(c*sj + sk*si));
   m_bpitch = 0;
   m_broll = 0;
   m_byaw = (1.0f - EPSILON)*m_byaw + EPSILON*(-(c*sk + si*sj));
@@ -126,8 +126,8 @@ flightController::update (float c, float si, float sj, float sk,
 			  uint16_t& ch3, uint16_t& ch4)
 {
   // These are 1/2 of linear estimations.
-  float pitch = (-(c*si + sk*sj)) - m_bpitch;
-  float roll = (-(c*sj - sk*si)) - m_broll;
+  float pitch = (-(c*si - sk*sj)) - m_bpitch;
+  float roll = (-(c*sj + sk*si)) - m_broll;
   float yaw = (-(c*sk + si*sj)) - m_byaw;
 
   // Flight log says that ~4% pwm change made ~3deg attitude change

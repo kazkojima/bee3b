@@ -403,7 +403,7 @@ bee3b (void *arg __attribute__ ((unused)))
 			{
 			  chmat (oi, oj, ok, 40.0f*cgain, ch1, ch2, ch3, ch4);
 			  // motor-channel skewed. 0:ch4, 1:ch1, 2:ch2, 3:ch3
-			  mo1=width[0] = chmix (command[0], (int) ch4, 50);
+			  width[0] = chmix (command[0], (int) ch4, 50);
 			  width[1] = chmix (command[1], (int) ch1, 50);
 			  width[2] = chmix (command[2], (int) ch2, 50);
 			  width[3] = chmix (command[3], (int) ch3, 50);
