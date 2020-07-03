@@ -114,7 +114,7 @@ tim4_init (void)
   TIM4->CCR4 = 0;
   // Auto reload, edge-aligned, upcounting
   TIM4->CR1 = CR1_ARPE;
-  // No slave mode, no DMA, no interrupt
+  // No child mode, no DMA, no interrupt
   TIM4->CR2 = 0;
   TIM4->SMCR = 0;
   TIM4->DIER = 0;

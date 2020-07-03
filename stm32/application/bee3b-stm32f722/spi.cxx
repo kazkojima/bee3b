@@ -98,7 +98,7 @@ spi_init (void)
   RCC->APB2RSTR |= RCC_APB2RSTR_SPI1RST;
   RCC->APB2RSTR &=~ RCC_APB2RSTR_SPI1RST;
 
-  // BR[1:0]: 3 (pclk/16), Master
+  // BR[1:0]: 3 (pclk/16), Main
   SPI1->CR1 = (3 << CR1_BR_SHIFT)| CR1_MSTR;
   // 8-bit, NSS asserted when SPI is enabled
   SPI1->CR2 = CR2_FRXTH | (7 << CR2_DS_SHIFT) | CR2_SSOE;
@@ -147,7 +147,7 @@ spi_init (void)
   RCC->APB1RSTR = RCC_APB1RSTR_SPI2RST;
   RCC->APB1RSTR = 0;
 
-  // BR[1:0]: 3 (pclk/16), Master
+  // BR[1:0]: 3 (pclk/16), Main
   SPI2->CR1 = (3 << CR1_BR_SHIFT)| CR1_MSTR;
   // 8-bit, NSS  asserted when SPI is enabled
   SPI2->CR2 = CR2_FRXTH | (7 << CR2_DS_SHIFT) | CR2_SSOE;

@@ -320,16 +320,6 @@ icm20602_init (void)
   icm20602_start ();
   icm20602_fifo_reset ();
 
-#if 0
-  // Configure slaves
-  // Set I2C_MST_EN, MST_P_NSR and set bus speed to 400kHz
-  rv = icm20602_read (USER_CTRL);
-  icm20602_write (USER_CTRL, rv | (1<<5));
-  icm20602_write (I2C_MST_CTRL, (1<<4)|13);
-  // Sample rate 100Hz
-  icm20602_write (I2C_SLV4_CTRL, 9);
-  icm20602_write (I2C_MST_DELAY_CTRL, 0x0f);
-#endif
   return true;
 }
 

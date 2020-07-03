@@ -11,6 +11,7 @@
 #include "esp_event.h"
 #include "esp_event_loop.h"
 #include "esp_partition.h"
+#include "esp_sleep.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "driver/gpio.h"

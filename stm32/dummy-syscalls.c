@@ -77,3 +77,8 @@ _getpid (void)
 {
   return -1;
 }
+
+void
+_fini (void)
+{
+}

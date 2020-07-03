@@ -69,6 +69,14 @@ SECTIONS
 	. = ALIGN(8);
     } > flash AT > lflash
 
+    .fini_array     :
+    {
+	__fini_array_start = .; 
+	KEEP (*(.fini_array))
+	KEEP (*(SORT(.fini_array.*)))
+	__fini_array_end = .; 
+    } > flash AT > lflash
+
     _etext = .;
     _textdata = _etext;
 
